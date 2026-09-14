@@ -37,6 +37,28 @@
     <strong>Adaugă pe ecranul principal</strong>. Deschide apoi aplicația de acolo.
   </section>
 
+  <nav class="tabs" id="main-tabs">
+    <button type="button" class="tab active" data-tab="list">Listă</button>
+    <button type="button" class="tab" data-tab="calendar">Calendar</button>
+  </nav>
+
+  <section id="view-calendar" class="view hidden">
+    <div class="cal-header">
+      <button type="button" id="cal-prev" class="btn-ghost-dark" aria-label="Luna anterioară">‹</button>
+      <h2 id="cal-month-label"></h2>
+      <button type="button" id="cal-next" class="btn-ghost-dark" aria-label="Luna următoare">›</button>
+    </div>
+    <div class="cal-weekdays">
+      <span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span>
+    </div>
+    <div id="cal-grid" class="cal-grid"></div>
+
+    <div id="cal-day-panel" class="cal-day-panel hidden">
+      <h3 id="cal-day-title"></h3>
+      <ul id="cal-day-list" class="dosare-list"></ul>
+    </div>
+  </section>
+
   <section id="view-list" class="view">
 
     <form id="form-add" class="card form-add">
