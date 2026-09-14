@@ -1,0 +1,21 @@
+{
+  "name": "dosar-monitor",
+  "version": "1.0.0",
+  "description": "Monitorizare automata dosare portal.just.ro (ECRIS) cu notificari push",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "gen-vapid": "node src/generateVapid.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "fast-xml-parser": "^4.4.1",
+    "node-cron": "^3.0.3",
+    "web-push": "^3.6.7",
+    "dotenv": "^16.4.5"
+  }
+}

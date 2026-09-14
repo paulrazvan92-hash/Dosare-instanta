@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Registrul meu de dosare</title>
+<meta name="theme-color" content="#1C2541" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Dosare" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-seal">⚖</span>
+      <div class="brand-text">
+        <h1>Registrul meu de dosare</h1>
+        <p>Monitorizare automată · portal.just.ro</p>
+      </div>
+    </div>
+    <button id="btn-notify" class="btn-ghost" type="button">Activează notificările</button>
+  </div>
+</header>
+
+<main id="app">
+
+  <section id="banner-standalone" class="banner hidden">
+    Pentru ca notificările să funcționeze pe iPhone, adaugă întâi această pagină pe ecranul principal:
+    apasă <strong>Distribuie</strong> (pătratul cu săgeată în sus) din Safari, apoi
+    <strong>Adaugă pe ecranul principal</strong>. Deschide apoi aplicația de acolo.
+  </section>
+
+  <section id="view-list" class="view">
+
+    <form id="form-add" class="card form-add">
+      <h2>Adaugă un dosar</h2>
+      <label>
+        Număr dosar (format ECRIS)
+        <input type="text" id="input-numar" placeholder="ex: 12345/3/2023" required />
+      </label>
+      <label class="optional">
+        Etichetă proprie <span>(opțional, ca să-l recunoști ușor)</span>
+        <input type="text" id="input-label" placeholder="ex: Dosar Popescu vs. ABC SRL" />
+      </label>
+      <details class="advanced">
+        <summary>Instanță (opțional, ajută dacă rezultatul e ambiguu)</summary>
+        <input type="text" id="input-institutie" placeholder="ex: TribunalulTIMIS" />
+        <p class="hint">Format fără spații/diacritice, ex: TribunalulTIMIS, JudecatoriaSECTORUL4BUCURESTI.</p>
+      </details>
+      <button type="submit" class="btn-primary">Adaugă și verifică acum</button>
+      <p id="form-error" class="error hidden"></p>
+    </form>
+
+    <h2 class="section-title">Dosare urmărite</h2>
+    <p id="empty-state" class="empty hidden">Nu urmărești niciun dosar încă. Adaugă unul mai sus.</p>
+    <ul id="dosare-list" class="dosare-list"></ul>
+
+  </section>
+
+  <section id="view-detail" class="view hidden">
+    <button id="btn-back" class="btn-ghost btn-back" type="button">← Înapoi la listă</button>
+    <div id="detail-content"></div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
