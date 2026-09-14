@@ -1,318 +1,1938 @@
-'use strict';
+```javascript
+/* =========================================================
+   REGISTRUL MEU DE DOSARE
+   Front-end logic
+   ========================================================= */
 
-const el = (sel) => document.querySelector(sel);
+const API_BASE = ""; // API-ul va fi apelat din aceeași aplicație
 
-const viewList = el('#view-list');
-const viewDetail = el('#view-detail');
-const dosareListEl = el('#dosare-list');
-const emptyStateEl = el('#empty-state');
-const formAdd = el('#form-add');
-const formError = el('#form-error');
-const btnBack = el('#btn-back');
-const btnNotify = el('#btn-notify');
-const detailContent = el('#detail-content');
-const bannerStandalone = el('#banner-standalone');
-const toastEl = el('#toast');
+const STORAGE_KEY = "dosare-monitor-v1";
 
-let toastTimer = null;
-function toast(msg) {
-  toastEl.textContent = msg;
-  toastEl.classList.remove('hidden');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.add('hidden'), 3200);
-}
+let state = {
+  dosare: [],
+  activeTab: "list",
+  selectedDosarId: null,
+  calendarDate: new Date(),
+  selectedCalendarDay: null
+};
 
-function fmtDate(d) {
-  if (!d) return '—';
+/* =========================================================
+   HELPERS
+   ========================================================= */
+
+function loadState() {
   try {
-    return new Date(d).toLocaleDateString('ro-RO', { day: '2-digit', month: 'long', year: 'numeric' });
-  } catch {
-    return String(d);
-  }
-}
+    const saved = localStorage.getItem(STORAGE_KEY);
 
-function fmtDateTime(d) {
-  if (!d) return '—';
-  try {
-    return new Date(d).toLocaleString('ro-RO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return String(d);
-  }
-}
+    if (saved) {
+      const parsed = JSON.parse(saved);
 
-// ---------- Navigare intre ecrane ----------
-
-function showList() {
-  viewDetail.classList.add('hidden');
-  viewList.classList.remove('hidden');
-  loadList();
-}
-
-function showDetail(id) {
-  viewList.classList.add('hidden');
-  viewDetail.classList.remove('hidden');
-  loadDetail(id);
-}
-
-btnBack.addEventListener('click', showList);
-
-// ---------- Lista de dosare ----------
-
-async function loadList() {
-  const res = await fetch('/api/dosare');
-  const dosare = await res.json();
-
-  dosareListEl.innerHTML = '';
-  emptyStateEl.classList.toggle('hidden', dosare.length > 0);
-
-  for (const d of dosare) {
-    const li = document.createElement('li');
-    li.className = 'dosar-row';
-    li.addEventListener('click', () => showDetail(d.id));
-
-    const snap = d.snapshot;
-    let tag = '<span class="tag tag-ok">La zi</span>';
-    if (d.lastError) tag = '<span class="tag tag-error">Eroare</span>';
-    else if (!d.lastChecked) tag = '<span class="tag tag-new">Nou</span>';
-
-    const stadiu = snap ? (snap.stadiuProcesualNume || snap.stadiuProcesual || '') : '';
-    const instanta = snap ? (snap.institutie || '') : (d.institutie || '');
-
-    li.innerHTML = `
-      <div class="dosar-main">
-        <div class="numar">${escapeHtml(d.numarDosar)}</div>
-        ${d.label ? `<div class="label">${escapeHtml(d.label)}</div>` : ''}
-        <div class="meta">${escapeHtml(instanta)}${stadiu ? ' · ' + escapeHtml(stadiu) : ''}</div>
-      </div>
-      ${tag}
-    `;
-    dosareListEl.appendChild(li);
-  }
-}
-
-function escapeHtml(str) {
-  const d = document.createElement('div');
-  d.textContent = str == null ? '' : String(str);
-  return d.innerHTML;
-}
-
-// ---------- Adaugare dosar ----------
-
-formAdd.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  formError.classList.add('hidden');
-
-  const numarDosar = el('#input-numar').value.trim();
-  const label = el('#input-label').value.trim();
-  const institutie = el('#input-institutie').value.trim();
-
-  if (!numarDosar) return;
-
-  const submitBtn = formAdd.querySelector('button[type="submit"]');
-  submitBtn.disabled = true;
-  submitBtn.textContent = 'Se verifică pe portal...';
-
-  try {
-    const res = await fetch('/api/dosare', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ numarDosar, label, institutie }),
-    });
-    const data = await res.json();
-
-    if (!res.ok) throw new Error(data.error || 'Eroare necunoscută');
-
-    if (!data.checkResult || !data.checkResult.ok) {
-      toast('Dosar adăugat, dar nu a putut fi găsit acum pe portal. Va fi reîncercat automat.');
-    } else {
-      toast('Dosar adăugat și verificat.');
+      if (parsed && typeof parsed === "object") {
+        state = {
+          ...state,
+          ...parsed,
+          calendarDate: new Date()
+        };
+      }
     }
-
-    formAdd.reset();
-    loadList();
   } catch (err) {
-    formError.textContent = err.message;
-    formError.classList.remove('hidden');
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Adaugă și verifică acum';
+    console.error("Nu s-au putut încărca datele:", err);
   }
-});
+}
 
-// ---------- Detaliu dosar ----------
+function saveState() {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      dosare: state.dosare,
+      activeTab: state.activeTab
+    })
+  );
+}
 
-async function loadDetail(id) {
-  detailContent.innerHTML = '<p>Se încarcă...</p>';
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
 
-  const [dosare, events] = await Promise.all([
-    fetch('/api/dosare').then((r) => r.json()),
-    fetch(`/api/dosare/${id}/events`).then((r) => r.json()),
-  ]);
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
-  const d = dosare.find((x) => x.id === id);
-  if (!d) {
-    detailContent.innerHTML = '<p>Dosarul nu mai există.</p>';
+function formatDate(value) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return escapeHtml(value);
+  }
+
+  return date.toLocaleDateString("ro-RO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  });
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return escapeHtml(value);
+  }
+
+  return date.toLocaleString("ro-RO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function showToast(message) {
+  const toast = document.getElementById("toast");
+
+  toast.textContent = message;
+  toast.classList.remove("hidden");
+
+  clearTimeout(showToast.timer);
+
+  showToast.timer = setTimeout(() => {
+    toast.classList.add("hidden");
+  }, 3500);
+}
+
+function generateId() {
+  return (
+    Date.now().toString(36) +
+    Math.random().toString(36).substring(2, 9)
+  );
+}
+
+/* =========================================================
+   API
+   ========================================================= */
+
+/*
+  IMPORTANT:
+
+  Browserul NU trebuie să acceseze direct portal.just.ro.
+
+  Site-ul portal.just.ro trebuie interogat de serverul nostru,
+  iar aplicația iPhone/web primește rezultatul de la API.
+
+  Endpoint-urile așteptate:
+
+  GET  /api/dosar?numar=12345%2F3%2F2023&institutie=...
+  POST /api/dosar
+
+  Răspunsul trebuie să aibă aproximativ forma:
+
+  {
+    "success": true,
+    "dosar": {
+      "numar": "...",
+      "institutie": "...",
+      "categorie": "...",
+      "dataUltimeiModificari": "...",
+      "parti": [],
+      "sedinte": [],
+      "solutii": [],
+      "evenimente": []
+    }
+  }
+*/
+
+async function apiGetDosar(numar, institutie = "") {
+  const params = new URLSearchParams();
+
+  params.set("numar", numar);
+
+  if (institutie) {
+    params.set("institutie", institutie);
+  }
+
+  const response = await fetch(
+    `${API_BASE}/api/dosar?${params.toString()}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json"
+      },
+      cache: "no-store"
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Serverul a răspuns cu codul ${response.status}.`
+    );
+  }
+
+  const data = await response.json();
+
+  if (!data.success) {
+    throw new Error(
+      data.message || "Dosarul nu a putut fi identificat."
+    );
+  }
+
+  return data.dosar;
+}
+
+/* =========================================================
+   NORMALIZARE DATE
+   ========================================================= */
+
+function normalizeDosar(data, existing = null) {
+  return {
+    id: existing?.id || generateId(),
+
+    numar:
+      data.numar ||
+      existing?.numar ||
+      "",
+
+    label:
+      existing?.label ||
+      data.label ||
+      "",
+
+    institutie:
+      data.institutie ||
+      existing?.institutie ||
+      "",
+
+    categorie:
+      data.categorie ||
+      existing?.categorie ||
+      "",
+
+    obiect:
+      data.obiect ||
+      existing?.obiect ||
+      "",
+
+    parti:
+      Array.isArray(data.parti)
+        ? data.parti
+        : existing?.parti || [],
+
+    sedinte:
+      Array.isArray(data.sedinte)
+        ? data.sedinte
+        : existing?.sedinte || [],
+
+    solutii:
+      Array.isArray(data.solutii)
+        ? data.solutii
+        : existing?.solutii || [],
+
+    evenimente:
+      Array.isArray(data.evenimente)
+        ? data.evenimente
+        : existing?.evenimente || [],
+
+    dataUltimeiModificari:
+      data.dataUltimeiModificari ||
+      existing?.dataUltimeiModificari ||
+      null,
+
+    ultimaVerificare:
+      new Date().toISOString(),
+
+    status:
+      data.status ||
+      existing?.status ||
+      "ok",
+
+    modificariNoi:
+      existing?.modificariNoi || 0,
+
+    snapshot:
+      data.snapshot ||
+      existing?.snapshot ||
+      null
+  };
+}
+
+/* =========================================================
+   COMPARARE MODIFICĂRI
+   ========================================================= */
+
+function createComparableSnapshot(dosar) {
+  return JSON.stringify({
+    institutie: dosar.institutie,
+    categorie: dosar.categorie,
+    obiect: dosar.obiect,
+    parti: dosar.parti,
+    sedinte: dosar.sedinte,
+    solutii: dosar.solutii,
+    evenimente: dosar.evenimente
+  });
+}
+
+function detectChanges(oldDosar, newDosar) {
+  const changes = [];
+
+  if (!oldDosar) {
+    return changes;
+  }
+
+  if (
+    JSON.stringify(oldDosar.sedinte || []) !==
+    JSON.stringify(newDosar.sedinte || [])
+  ) {
+    changes.push("Au fost modificate ședințele/termenele.");
+  }
+
+  if (
+    JSON.stringify(oldDosar.solutii || []) !==
+    JSON.stringify(newDosar.solutii || [])
+  ) {
+    changes.push("A fost introdusă sau modificată o soluție.");
+  }
+
+  if (
+    JSON.stringify(oldDosar.evenimente || []) !==
+    JSON.stringify(newDosar.evenimente || [])
+  ) {
+    changes.push("Au fost adăugate modificări în istoricul dosarului.");
+  }
+
+  if (
+    JSON.stringify(oldDosar.parti || []) !==
+    JSON.stringify(newDosar.parti || [])
+  ) {
+    changes.push("Au fost modificate părțile dosarului.");
+  }
+
+  return changes;
+}
+
+/* =========================================================
+   ADAUGARE DOSAR
+   ========================================================= */
+
+async function addDosar(event) {
+  event.preventDefault();
+
+  const numarInput = document.getElementById("input-numar");
+  const labelInput = document.getElementById("input-label");
+  const institutieInput = document.getElementById("input-institutie");
+  const errorBox = document.getElementById("form-error");
+
+  const numar = numarInput.value.trim();
+  const label = labelInput.value.trim();
+  const institutie = institutieInput.value.trim();
+
+  errorBox.classList.add("hidden");
+  errorBox.textContent = "";
+
+  if (!numar) {
+    errorBox.textContent = "Introdu numărul dosarului.";
+    errorBox.classList.remove("hidden");
     return;
   }
 
-  const s = d.snapshot || {};
-  const sedinte = Array.isArray(s.sedinte) ? s.sedinte : [];
-  const parti = Array.isArray(s.parti) ? s.parti : [];
+  const existing = state.dosare.find(
+    d => d.numar.toLowerCase() === numar.toLowerCase()
+  );
 
-  let timelineHtml = '<p style="font-size:0.85rem;color:#9A9385;">Niciun termen preluat încă.</p>';
-  if (sedinte.length) {
-    timelineHtml = '<ul class="timeline">' + sedinte.map((sd) => {
-      const solutie = findSolutieField(sd);
+  if (existing) {
+    errorBox.textContent =
+      "Acest dosar este deja în lista de monitorizare.";
+    errorBox.classList.remove("hidden");
+    return;
+  }
+
+  const button = event.submitter;
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Se verifică...";
+  }
+
+  try {
+    const data = await apiGetDosar(numar, institutie);
+
+    const dosar = normalizeDosar(data);
+
+    dosar.label = label;
+
+    dosar.snapshot = createComparableSnapshot(dosar);
+
+    state.dosare.unshift(dosar);
+
+    saveState();
+    renderList();
+
+    numarInput.value = "";
+    labelInput.value = "";
+    institutieInput.value = "";
+
+    showToast("Dosarul a fost adăugat și verificat.");
+
+  } catch (error) {
+    console.error(error);
+
+    errorBox.textContent =
+      error.message ||
+      "Nu am putut verifica dosarul.";
+
+    errorBox.classList.remove("hidden");
+
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Adaugă și verifică acum";
+    }
+  }
+}
+
+/* =========================================================
+   VERIFICARE DOSAR
+   ========================================================= */
+
+async function refreshDosar(dosar, silent = false) {
+  try {
+    const oldSnapshot =
+      dosar.snapshot ||
+      createComparableSnapshot(dosar);
+
+    const data = await apiGetDosar(
+      dosar.numar,
+      dosar.institutie
+    );
+
+    const updated = normalizeDosar(data, dosar);
+
+    const changes = detectChanges(dosar, updated);
+
+    updated.snapshot = createComparableSnapshot(updated);
+
+    if (changes.length > 0) {
+      updated.modificariNoi =
+        (dosar.modificariNoi || 0) + changes.length;
+
+      updated.lastChanges = changes;
+
+      if (!silent) {
+        showToast(
+          `${dosar.numar}: ${changes[0]}`
+        );
+      }
+
+      sendNotification(
+        dosar,
+        changes
+      );
+    } else {
+      updated.modificariNoi =
+        dosar.modificariNoi || 0;
+    }
+
+    const index = state.dosare.findIndex(
+      d => d.id === dosar.id
+    );
+
+    if (index !== -1) {
+      state.dosare[index] = updated;
+    }
+
+    saveState();
+
+    renderList();
+
+    if (state.selectedDosarId === dosar.id) {
+      renderDetail(updated);
+    }
+
+    return {
+      changed: changes.length > 0,
+      changes
+    };
+
+  } catch (error) {
+    console.error(
+      `Eroare la verificarea dosarului ${dosar.numar}:`,
+      error
+    );
+
+    dosar.status = "error";
+    dosar.ultimaVerificare =
+      new Date().toISOString();
+
+    saveState();
+    renderList();
+
+    if (!silent) {
+      showToast(
+        `Nu s-a putut verifica ${dosar.numar}.`
+      );
+    }
+
+    return {
+      changed: false,
+      error
+    };
+  }
+}
+
+/* =========================================================
+   VERIFICARE TOATE DOSARELE
+   ========================================================= */
+
+async function refreshAllDosare() {
+  if (!state.dosare.length) {
+    return;
+  }
+
+  console.log(
+    "Începe verificarea automată a dosarelor..."
+  );
+
+  for (const dosar of [...state.dosare]) {
+    await refreshDosar(dosar, true);
+
+    /*
+      O mică pauză între solicitări pentru a evita
+      trimiterea simultană a foarte multor cereri.
+    */
+    await sleep(1000);
+  }
+
+  console.log(
+    "Verificarea tuturor dosarelor s-a terminat."
+  );
+}
+
+function sleep(ms) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/* =========================================================
+   NOTIFICĂRI
+   ========================================================= */
+
+async function requestNotifications() {
+  if (!("Notification" in window)) {
+    showToast(
+      "Acest browser nu suportă notificări."
+    );
+    return;
+  }
+
+  try {
+    const permission =
+      await Notification.requestPermission();
+
+    if (permission === "granted") {
+      showToast(
+        "Notificările au fost activate."
+      );
+
+      updateNotificationButton();
+
+    } else {
+      showToast(
+        "Notificările nu au fost permise."
+      );
+    }
+
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function sendNotification(dosar, changes) {
+  if (
+    !("Notification" in window) ||
+    Notification.permission !== "granted"
+  ) {
+    return;
+  }
+
+  const title =
+    dosar.label ||
+    `Dosar ${dosar.numar}`;
+
+  const body =
+    changes.length === 1
+      ? changes[0]
+      : `${changes.length} modificări noi în dosar.`;
+
+  try {
+    new Notification(title, {
+      body,
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png"
+    });
+  } catch (error) {
+    console.error(
+      "Notificarea nu a putut fi afișată:",
+      error
+    );
+  }
+}
+
+function updateNotificationButton() {
+  const button =
+    document.getElementById("btn-notify");
+
+  if (!button) return;
+
+  if (
+    "Notification" in window &&
+    Notification.permission === "granted"
+  ) {
+    button.textContent =
+      "Notificările sunt active";
+  }
+}
+
+/* =========================================================
+   LISTĂ DOSARE
+   ========================================================= */
+
+function renderList() {
+  const list =
+    document.getElementById("dosare-list");
+
+  const empty =
+    document.getElementById("empty-state");
+
+  if (!state.dosare.length) {
+    list.innerHTML = "";
+    empty.classList.remove("hidden");
+    return;
+  }
+
+  empty.classList.add("hidden");
+
+  list.innerHTML = state.dosare
+    .map(dosar => {
+
+      let tag = "";
+
+      if (dosar.status === "error") {
+        tag =
+          '<span class="tag tag-error">Eroare</span>';
+      } else if ((dosar.modificariNoi || 0) > 0) {
+        tag =
+          `<span class="tag tag-new">+${dosar.modificariNoi} nou</span>`;
+      } else {
+        tag =
+          '<span class="tag tag-ok">Monitorizat</span>';
+      }
+
+      const nextHearing =
+        getNextHearing(dosar);
+
       return `
-        <li>
-          <div class="t-date">${fmtDate(sd.data)}${sd.ora ? ' · ora ' + escapeHtml(sd.ora) : ''}</div>
-          ${sd.complet ? `<div class="t-complet">Complet: ${escapeHtml(sd.complet)}</div>` : ''}
-          ${solutie ? `<div class="t-solutie">${escapeHtml(solutie)}</div>` : ''}
+        <li
+          class="dosar-row"
+          data-id="${escapeHtml(dosar.id)}"
+        >
+          <div class="dosar-main">
+
+            <div class="numar">
+              ${escapeHtml(dosar.numar)}
+            </div>
+
+            ${
+              dosar.label
+                ? `<div class="label">
+                    ${escapeHtml(dosar.label)}
+                   </div>`
+                : ""
+            }
+
+            <div class="meta">
+              ${
+                escapeHtml(
+                  dosar.institutie || "Instanță necunoscută"
+                )
+              }
+
+              ${
+                nextHearing
+                  ? ` · Următor termen:
+                     ${formatDateTime(
+                       nextHearing.data || nextHearing.date
+                     )}`
+                  : ""
+              }
+            </div>
+
+          </div>
+
+          ${tag}
+
         </li>
       `;
-    }).join('') + '</ul>';
+    })
+    .join("");
+
+  list
+    .querySelectorAll(".dosar-row")
+    .forEach(row => {
+      row.addEventListener("click", () => {
+        openDetail(row.dataset.id);
+      });
+    });
+}
+
+/* =========================================================
+   TERMEN URMĂTOR
+   ========================================================= */
+
+function getNextHearing(dosar) {
+  if (!Array.isArray(dosar.sedinte)) {
+    return null;
   }
 
-  let partiHtml = '<p style="font-size:0.85rem;color:#9A9385;">Fără informații despre părți.</p>';
-  if (parti.length) {
-    partiHtml = '<div class="parti-list">' + parti.map((p) => {
-      const nume = p.nume || p.numeParte || Object.values(p).find((v) => typeof v === 'string') || '—';
-      const calitate = p.calitateParte || p.calitate || '';
-      return `${escapeHtml(nume)}${calitate ? ' — ' + escapeHtml(calitate) : ''}`;
-    }).join('<br>') + '</div>';
-  }
+  const now = new Date();
 
-  let eventsHtml = '<p style="font-size:0.85rem;color:#9A9385;">Niciun eveniment încă.</p>';
-  if (events.length) {
-    eventsHtml = '<ul class="events-list">' + events.map((e) => `
-      <li>${escapeHtml(e.message)}<span class="e-date">${fmtDateTime(e.createdAt)}</span></li>
-    `).join('') + '</ul>';
-  }
+  const future = dosar.sedinte
+    .filter(s => {
+      const date =
+        new Date(
+          s.data ||
+          s.date ||
+          s.dataSedinta
+        );
 
-  detailContent.innerHTML = `
+      return (
+        !Number.isNaN(date.getTime()) &&
+        date >= now
+      );
+    })
+    .sort((a, b) => {
+      const dateA = new Date(
+        a.data ||
+        a.date ||
+        a.dataSedinta
+      );
+
+      const dateB = new Date(
+        b.data ||
+        b.date ||
+        b.dataSedinta
+      );
+
+      return dateA - dateB;
+    });
+
+  return future[0] || null;
+}
+
+/* =========================================================
+   DETALII DOSAR
+   ========================================================= */
+
+function openDetail(id) {
+  state.selectedDosarId = id;
+
+  const dosar =
+    state.dosare.find(d => d.id === id);
+
+  if (!dosar) return;
+
+  document
+    .getElementById("view-list")
+    .classList.add("hidden");
+
+  document
+    .getElementById("view-calendar")
+    .classList.add("hidden");
+
+  document
+    .getElementById("view-detail")
+    .classList.remove("hidden");
+
+  renderDetail(dosar);
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
+  });
+}
+
+function renderDetail(dosar) {
+  const container =
+    document.getElementById("detail-content");
+
+  const nextHearing =
+    getNextHearing(dosar);
+
+  container.innerHTML = `
     <div class="detail-header">
-      <div class="numar">${escapeHtml(d.numarDosar)}</div>
-      ${d.label ? `<div class="label">${escapeHtml(d.label)}</div>` : ''}
+
+      <div class="numar">
+        ${escapeHtml(dosar.numar)}
+      </div>
+
+      ${
+        dosar.label
+          ? `<div class="label">
+              ${escapeHtml(dosar.label)}
+             </div>`
+          : ""
+      }
+
     </div>
 
     <div class="detail-grid">
-      <div class="row"><span class="k">Instanță</span><span class="v">${escapeHtml(s.institutie || d.institutie || '—')}</span></div>
-      <div class="row"><span class="k">Obiect</span><span class="v">${escapeHtml(s.obiect || '—')}</span></div>
-      <div class="row"><span class="k">Stadiu procesual</span><span class="v">${escapeHtml(s.stadiuProcesualNume || s.stadiuProcesual || '—')}</span></div>
-      <div class="row"><span class="k">Categorie</span><span class="v">${escapeHtml(s.categorieCazNume || s.categorieCaz || '—')}</span></div>
-      <div class="row"><span class="k">Ultima verificare</span><span class="v">${fmtDateTime(d.lastChecked)}</span></div>
-      ${d.lastError ? `<div class="row"><span class="k">Eroare</span><span class="v" style="color:#A6432D">${escapeHtml(d.lastError)}</span></div>` : ''}
+
+      <div class="row">
+        <span class="k">Instanță</span>
+        <span class="v">
+          ${escapeHtml(dosar.institutie || "—")}
+        </span>
+      </div>
+
+      <div class="row">
+        <span class="k">Categorie</span>
+        <span class="v">
+          ${escapeHtml(dosar.categorie || "—")}
+        </span>
+      </div>
+
+      <div class="row">
+        <span class="k">Obiect</span>
+        <span class="v">
+          ${escapeHtml(dosar.obiect || "—")}
+        </span>
+      </div>
+
+      <div class="row">
+        <span class="k">Ultima modificare</span>
+        <span class="v">
+          ${formatDateTime(
+            dosar.dataUltimeiModificari
+          )}
+        </span>
+      </div>
+
+      <div class="row">
+        <span class="k">Ultima verificare</span>
+        <span class="v">
+          ${formatDateTime(
+            dosar.ultimaVerificare
+          )}
+        </span>
+      </div>
+
     </div>
 
-    <h3 class="timeline-title">Termene</h3>
-    ${timelineHtml}
+    ${
+      nextHearing
+        ? renderNextHearing(nextHearing)
+        : ""
+    }
 
-    <h3 class="parti-title">Părți</h3>
-    ${partiHtml}
+    ${renderParti(dosar)}
 
-    <h3 class="events-title">Istoric notificări</h3>
-    ${eventsHtml}
+    ${renderSedinte(dosar)}
+
+    ${renderSolutii(dosar)}
+
+    ${renderTimeline(dosar)}
 
     <div class="actions-row">
-      <button class="btn-secondary" id="btn-refresh">Verifică acum</button>
-      <button class="btn-secondary btn-danger" id="btn-delete">Șterge dosarul</button>
+
+      <button
+        type="button"
+        class="btn-secondary"
+        id="btn-refresh-detail"
+      >
+        Verifică acum
+      </button>
+
+      <button
+        type="button"
+        class="btn-secondary btn-danger"
+        id="btn-delete-detail"
+      >
+        Șterge din monitorizare
+      </button>
+
     </div>
   `;
 
-  el('#btn-refresh').addEventListener('click', async (ev) => {
-    ev.target.disabled = true;
-    ev.target.textContent = 'Se verifică...';
-    const res = await fetch(`/api/dosare/${id}/refresh`, { method: 'POST' });
-    const data = await res.json();
-    const n = data.checkResult && data.checkResult.events ? data.checkResult.events.length : 0;
-    toast(n > 0 ? `${n} modificare(i) găsită(e).` : 'Nicio modificare nouă.');
-    loadDetail(id);
-  });
+  document
+    .getElementById("btn-refresh-detail")
+    ?.addEventListener("click", async () => {
 
-  el('#btn-delete').addEventListener('click', async () => {
-    if (!confirm('Ștergi acest dosar din listă? Nu mai primești notificări pentru el.')) return;
-    await fetch(`/api/dosare/${id}`, { method: 'DELETE' });
-    toast('Dosar șters.');
-    showList();
-  });
+      const button =
+        document.getElementById(
+          "btn-refresh-detail"
+        );
+
+      button.disabled = true;
+      button.textContent = "Se verifică...";
+
+      await refreshDosar(dosar);
+
+      button.disabled = false;
+      button.textContent = "Verifică acum";
+    });
+
+  document
+    .getElementById("btn-delete-detail")
+    ?.addEventListener("click", () => {
+      deleteDosar(dosar.id);
+    });
 }
 
-// cauta generic un camp ce pare sa contina solutia, indiferent de numele exact
-// al proprietatii intoarse de portal (portalul nu documenteaza public schema exacta)
-function findSolutieField(sedinta) {
-  for (const [key, val] of Object.entries(sedinta || {})) {
-    if (typeof val !== 'string' || !val.trim()) continue;
-    const k = key.toLowerCase();
-    if (k.includes('solutie') || k.includes('sumar') || k.includes('minuta')) return val;
+function renderNextHearing(hearing) {
+  const date =
+    hearing.data ||
+    hearing.date ||
+    hearing.dataSedinta;
+
+  return `
+    <h3 class="events-title">
+      Următorul termen
+    </h3>
+
+    <div class="card">
+
+      <strong>
+        ${formatDate(date)}
+      </strong>
+
+      ${
+        hearing.ora
+          ? `<div>
+              Ora: ${escapeHtml(hearing.ora)}
+             </div>`
+          : ""
+      }
+
+      ${
+        hearing.complet
+          ? `<div>
+              Complet: ${escapeHtml(
+                hearing.complet
+              )}
+             </div>`
+          : ""
+      }
+
+      ${
+        hearing.sala
+          ? `<div>
+              Sala: ${escapeHtml(
+                hearing.sala
+              )}
+             </div>`
+          : ""
+      }
+
+      ${
+        hearing.materie
+          ? `<div>
+              Materie: ${escapeHtml(
+                hearing.materie
+              )}
+             </div>`
+          : ""
+      }
+
+    </div>
+  `;
+}
+
+/* =========================================================
+   PĂRȚI
+   ========================================================= */
+
+function renderParti(dosar) {
+  if (!Array.isArray(dosar.parti) ||
+      !dosar.parti.length) {
+    return "";
   }
-  return null;
+
+  return `
+    <h3 class="parti-title">
+      Părți
+    </h3>
+
+    <div class="parti-list">
+
+      ${dosar.parti
+        .map(part => {
+
+          if (typeof part === "string") {
+            return `
+              <div>
+                ${escapeHtml(part)}
+              </div>
+            `;
+          }
+
+          return `
+            <div>
+              ${
+                part.calitate
+                  ? `<strong>
+                      ${escapeHtml(
+                        part.calitate
+                      )}:
+                     </strong> `
+                  : ""
+              }
+
+              ${escapeHtml(
+                part.nume ||
+                part.name ||
+                ""
+              )}
+            </div>
+          `;
+        })
+        .join("")}
+
+    </div>
+  `;
 }
 
-// ---------- Notificari push ----------
+/* =========================================================
+   ȘEDINȚE / TERMENE
+   ========================================================= */
 
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+function renderSedinte(dosar) {
+  if (!Array.isArray(dosar.sedinte) ||
+      !dosar.sedinte.length) {
+    return "";
+  }
+
+  const sedinte =
+    [...dosar.sedinte].sort((a, b) => {
+
+      const da = new Date(
+        a.data ||
+        a.date ||
+        a.dataSedinta
+      );
+
+      const db = new Date(
+        b.data ||
+        b.date ||
+        b.dataSedinta
+      );
+
+      return db - da;
+    });
+
+  return `
+    <h3 class="events-title">
+      Termene de judecată
+    </h3>
+
+    <ul class="events-list">
+
+      ${sedinte
+        .map(sedinta => {
+
+          const date =
+            sedinta.data ||
+            sedinta.date ||
+            sedinta.dataSedinta;
+
+          return `
+            <li>
+
+              <strong>
+                ${formatDate(date)}
+              </strong>
+
+              ${
+                sedinta.ora
+                  ? ` · Ora:
+                     ${escapeHtml(
+                       sedinta.ora
+                     )}`
+                  : ""
+              }
+
+              ${
+                sedinta.complet
+                  ? `<div>
+                      Complet:
+                      ${escapeHtml(
+                        sedinta.complet
+                      )}
+                     </div>`
+                  : ""
+              }
+
+              ${
+                sedinta.sala
+                  ? `<div>
+                      Sala:
+                      ${escapeHtml(
+                        sedinta.sala
+                      )}
+                     </div>`
+                  : ""
+              }
+
+              ${
+                sedinta.materie
+                  ? `<div>
+                      ${escapeHtml(
+                        sedinta.materie
+                      )}
+                     </div>`
+                  : ""
+              }
+
+              ${
+                sedinta.solutie
+                  ? `<div>
+                      Soluție:
+                      ${escapeHtml(
+                        sedinta.solutie
+                      )}
+                     </div>`
+                  : ""
+              }
+
+              <span class="e-date">
+                ${
+                  sedinta.actualizatLa
+                    ? `Actualizat:
+                       ${formatDateTime(
+                         sedinta.actualizatLa
+                       )}`
+                    : ""
+                }
+              </span>
+
+            </li>
+          `;
+        })
+        .join("")}
+
+    </ul>
+  `;
 }
+
+/* =========================================================
+   SOLUȚII
+   ========================================================= */
+
+function renderSolutii(dosar) {
+  if (!Array.isArray(dosar.solutii) ||
+      !dosar.solutii.length) {
+    return "";
+  }
+
+  const solutii =
+    [...dosar.solutii].sort((a, b) => {
+
+      const da = new Date(
+        a.data ||
+        a.date
+      );
+
+      const db = new Date(
+        b.data ||
+        b.date
+      );
+
+      return db - da;
+    });
+
+  return `
+    <h3 class="events-title">
+      Soluții
+    </h3>
+
+    <ul class="timeline">
+
+      ${solutii
+        .map(solutie => {
+
+          const date =
+            solutie.data ||
+            solutie.date;
+
+          return `
+            <li>
+
+              <div class="t-date">
+                ${formatDate(date)}
+              </div>
+
+              ${
+                solutie.complet
+                  ? `<div class="t-complet">
+                      Complet:
+                      ${escapeHtml(
+                        solutie.complet
+                      )}
+                     </div>`
+                  : ""
+              }
+
+              <div class="t-solutie">
+                ${escapeHtml(
+                  solutie.text ||
+                  solutie.solutie ||
+                  solutie.descriere ||
+                  ""
+                )}
+              </div>
+
+            </li>
+          `;
+        })
+        .join("")}
+
+    </ul>
+  `;
+}
+
+/* =========================================================
+   ISTORIC
+   ========================================================= */
+
+function renderTimeline(dosar) {
+  if (!Array.isArray(dosar.evenimente) ||
+      !dosar.evenimente.length) {
+    return "";
+  }
+
+  return `
+    <h3 class="timeline-title">
+      Istoric modificări
+    </h3>
+
+    <ul class="timeline">
+
+      ${dosar.evenimente
+        .map(event => {
+
+          return `
+            <li>
+
+              <div class="t-date">
+                ${formatDateTime(
+                  event.data ||
+                  event.date
+                )}
+              </div>
+
+              <div class="t-complet">
+                ${escapeHtml(
+                  event.tip ||
+                  event.type ||
+                  "Modificare"
+                )}
+              </div>
+
+              ${
+                event.text ||
+                event.descriere
+                  ? `<div class="t-solutie">
+                      ${escapeHtml(
+                        event.text ||
+                        event.descriere
+                      )}
+                     </div>`
+                  : ""
+              }
+
+            </li>
+          `;
+        })
+        .join("")}
+
+    </ul>
+  `;
+}
+
+/* =========================================================
+   ȘTERGERE DOSAR
+   ========================================================= */
+
+function deleteDosar(id) {
+  const dosar =
+    state.dosare.find(d => d.id === id);
+
+  if (!dosar) return;
+
+  const confirmed =
+    window.confirm(
+      `Ștergi dosarul ${dosar.numar} din lista de monitorizare?`
+    );
+
+  if (!confirmed) return;
+
+  state.dosare =
+    state.dosare.filter(
+      d => d.id !== id
+    );
+
+  state.selectedDosarId = null;
+
+  saveState();
+
+  document
+    .getElementById("view-detail")
+    .classList.add("hidden");
+
+  document
+    .getElementById("view-list")
+    .classList.remove("hidden");
+
+  renderList();
+
+  showToast("Dosarul a fost eliminat.");
+}
+
+/* =========================================================
+   TABS
+   ========================================================= */
+
+function switchTab(tab) {
+  state.activeTab = tab;
+
+  const listView =
+    document.getElementById("view-list");
+
+  const calendarView =
+    document.getElementById("view-calendar");
+
+  const detailView =
+    document.getElementById("view-detail");
+
+  const tabs =
+    document.querySelectorAll(".tab");
+
+  detailView.classList.add("hidden");
+
+  tabs.forEach(button => {
+    button.classList.toggle(
+      "active",
+      button.dataset.tab === tab
+    );
+  });
+
+  if (tab === "calendar") {
+    listView.classList.add("hidden");
+    calendarView.classList.remove("hidden");
+    renderCalendar();
+  } else {
+    calendarView.classList.add("hidden");
+    listView.classList.remove("hidden");
+  }
+
+  saveState();
+}
+
+/* =========================================================
+   CALENDAR
+   ========================================================= */
+
+function renderCalendar() {
+  const grid =
+    document.getElementById("cal-grid");
+
+  const label =
+    document.getElementById(
+      "cal-month-label"
+    );
+
+  const date =
+    state.calendarDate;
+
+  const year =
+    date.getFullYear();
+
+  const month =
+    date.getMonth();
+
+  label.textContent =
+    date.toLocaleDateString(
+      "ro-RO",
+      {
+        month: "long",
+        year: "numeric"
+      }
+    );
+
+  const firstDay =
+    new Date(
+      year,
+      month,
+      1
+    );
+
+  const lastDay =
+    new Date(
+      year,
+      month + 1,
+      0
+    );
+
+  /*
+    JavaScript:
+    0 = duminică
+
+    Calendarul nostru:
+    Luni = prima zi
+  */
+
+  let startingDay =
+    firstDay.getDay();
+
+  startingDay =
+    startingDay === 0
+      ? 6
+      : startingDay - 1;
+
+  let html = "";
+
+  for (let i = 0; i < startingDay; i++) {
+    html += `
+      <div class="cal-day empty"></div>
+    `;
+  }
+
+  const today =
+    new Date();
+
+  for (
+    let day = 1;
+    day <= lastDay.getDate();
+    day++
+  ) {
+
+    const current =
+      new Date(
+        year,
+        month,
+        day
+      );
+
+    const events =
+      getCalendarEvents(current);
+
+    const isToday =
+      current.toDateString() ===
+      today.toDateString();
+
+    const isSelected =
+      state.selectedCalendarDay ===
+      current.toISOString().substring(0, 10);
+
+    html += `
+      <button
+        type="button"
+        class="cal-day
+          ${events.length ? "has-events" : ""}
+          ${isToday ? "today" : ""}
+          ${isSelected ? "selected" : ""}
+        "
+        data-date="${current
+          .toISOString()
+          .substring(0, 10)}"
+      >
+        <span>${day}</span>
+
+        ${
+          events.length
+            ? `<span class="cal-dot"></span>`
+            : ""
+        }
+      </button>
+    `;
+  }
+
+  grid.innerHTML = html;
+
+  grid
+    .querySelectorAll(
+      ".cal-day.has-events"
+    )
+    .forEach(button => {
+
+      button.addEventListener(
+        "click",
+        () => {
+
+          state.selectedCalendarDay =
+            button.dataset.date;
+
+          renderCalendarDay(
+            new Date(
+              `${button.dataset.date}T00:00:00`
+            )
+          );
+
+          renderCalendar();
+        }
+      );
+    });
+}
+
+function getCalendarEvents(date) {
+  const result = [];
+
+  for (const dosar of state.dosare) {
+
+    if (!Array.isArray(dosar.sedinte)) {
+      continue;
+    }
+
+    for (const sedinta of dosar.sedinte) {
+
+      const value =
+        sedinta.data ||
+        sedinta.date ||
+        sedinta.dataSedinta;
+
+      if (!value) continue;
+
+      const hearingDate =
+        new Date(value);
+
+      if (
+        Number.isNaN(
+          hearingDate.getTime()
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        hearingDate.getFullYear() ===
+          date.getFullYear() &&
+        hearingDate.getMonth() ===
+          date.getMonth() &&
+        hearingDate.getDate() ===
+          date.getDate()
+      ) {
+        result.push({
+          dosar,
+          sedinta
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+function renderCalendarDay(date) {
+  const panel =
+    document.getElementById(
+      "cal-day-panel"
+    );
+
+  const title =
+    document.getElementById(
+      "cal-day-title"
+    );
+
+  const list =
+    document.getElementById(
+      "cal-day-list"
+    );
+
+  const events =
+    getCalendarEvents(date);
+
+  if (!events.length) {
+    panel.classList.add("hidden");
+    return;
+  }
+
+  panel.classList.remove("hidden");
+
+  title.textContent =
+    date.toLocaleDateString(
+      "ro-RO",
+      {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      }
+    );
+
+  list.innerHTML =
+    events
+      .map(event => {
+
+        const dosar =
+          event.dosar;
+
+        const sedinta =
+          event.sedinta;
+
+        return `
+          <li
+            class="dosar-row"
+            data-id="${escapeHtml(
+              dosar.id
+            )}"
+          >
+
+            <div class="dosar-main">
+
+              <div class="numar">
+                ${escapeHtml(
+                  dosar.numar
+                )}
+              </div>
+
+              ${
+                dosar.label
+                  ? `<div class="label">
+                      ${escapeHtml(
+                        dosar.label
+                      )}
+                     </div>`
+                  : ""
+              }
+
+              <div class="meta">
+
+                ${
+                  sedinta.ora
+                    ? `Ora:
+                       ${escapeHtml(
+                         sedinta.ora
+                       )}`
+                    : ""
+                }
+
+                ${
+                  sedinta.complet
+                    ? ` · Complet:
+                       ${escapeHtml(
+                         sedinta.complet
+                       )}`
+                    : ""
+                }
+
+                ${
+                  sedinta.sala
+                    ? ` · Sala:
+                       ${escapeHtml(
+                         sedinta.sala
+                       )}`
+                    : ""
+                }
+
+              </div>
+
+            </div>
+
+          </li>
+        `;
+      })
+      .join("");
+
+  list
+    .querySelectorAll(".dosar-row")
+    .forEach(row => {
+
+      row.addEventListener(
+        "click",
+        () => {
+          openDetail(
+            row.dataset.id
+          );
+        }
+      );
+
+    });
+}
+
+/* =========================================================
+   INSTALARE PWA
+   ========================================================= */
 
 function isStandalone() {
-  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  return (
+    window.matchMedia(
+      "(display-mode: standalone)"
+    ).matches ||
+    window.navigator.standalone === true
+  );
 }
 
-async function enableNotifications() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    toast('Browserul acesta nu suportă notificări push.');
+function updateStandaloneBanner() {
+  const banner =
+    document.getElementById(
+      "banner-standalone"
+    );
+
+  if (!banner) return;
+
+  if (
+    !isStandalone() &&
+    /iPhone|iPad|iPod/i.test(
+      navigator.userAgent
+    )
+  ) {
+    banner.classList.remove(
+      "hidden"
+    );
+  } else {
+    banner.classList.add(
+      "hidden"
+    );
+  }
+}
+
+/* =========================================================
+   SERVICE WORKER
+   ========================================================= */
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
     return;
   }
 
-  if (!isStandalone()) {
-    bannerStandalone.classList.remove('hidden');
-    toast('Adaugă mai întâi aplicația pe ecranul principal (vezi instrucțiunile de mai sus).');
-    return;
+  try {
+    await navigator.serviceWorker.register(
+      "/service-worker.js"
+    );
+
+    console.log(
+      "Service Worker înregistrat."
+    );
+
+  } catch (error) {
+    console.error(
+      "Service Worker error:",
+      error
+    );
   }
-
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') {
-    toast('Nu ai permis notificările. Le poți activa oricând din Setări.');
-    return;
-  }
-
-  const reg = await navigator.serviceWorker.ready;
-  const keyRes = await fetch('/api/vapid-public-key');
-  const { key } = await keyRes.json();
-
-  if (!key) {
-    toast('Serverul nu are configurate cheile de notificare (VAPID). Vezi ghidul de configurare.');
-    return;
-  }
-
-  const sub = await reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(key),
-  });
-
-  await fetch('/api/subscribe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(sub),
-  });
-
-  btnNotify.textContent = 'Notificări active ✓';
-  toast('Notificările sunt active pe acest dispozitiv.');
 }
 
-btnNotify.addEventListener('click', enableNotifications);
+/* =========================================================
+   EVENIMENTE UI
+   ========================================================= */
 
-// ---------- Pornire ----------
+function bindEvents() {
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch((err) => console.error('SW error', err));
+  document
+    .getElementById("form-add")
+    ?.addEventListener(
+      "submit",
+      addDosar
+    );
+
+  document
+    .getElementById("btn-notify")
+    ?.addEventListener(
+      "click",
+      requestNotifications
+    );
+
+  document
+    .getElementById("btn-back")
+    ?.addEventListener(
+      "click",
+      () => {
+
+        state.selectedDosarId =
+          null;
+
+        document
+          .getElementById(
+            "view-detail"
+          )
+          .classList.add("hidden");
+
+        if (
+          state.activeTab ===
+          "calendar"
+        ) {
+          document
+            .getElementById(
+              "view-calendar"
+            )
+            .classList.remove(
+              "hidden"
+            );
+
+          renderCalendar();
+
+        } else {
+          document
+            .getElementById(
+              "view-list"
+            )
+            .classList.remove(
+              "hidden"
+            );
+        }
+
+      }
+    );
+
+  document
+    .querySelectorAll(".tab")
+    .forEach(button => {
+
+      button.addEventListener(
+        "click",
+        () => {
+          switchTab(
+            button.dataset.tab
+          );
+        }
+      );
+
+    });
+
+  document
+    .getElementById("cal-prev")
+    ?.addEventListener(
+      "click",
+      () => {
+
+        state.calendarDate =
+          new Date(
+            state.calendarDate.getFullYear(),
+            state.calendarDate.getMonth() - 1,
+            1
+          );
+
+        state.selectedCalendarDay =
+          null;
+
+        renderCalendar();
+
+        document
+          .getElementById(
+            "cal-day-panel"
+          )
+          .classList.add("hidden");
+      }
+    );
+
+  document
+    .getElementById("cal-next")
+    ?.addEventListener(
+      "click",
+      () => {
+
+        state.calendarDate =
+          new Date(
+            state.calendarDate.getFullYear(),
+            state.calendarDate.getMonth() + 1,
+            1
+          );
+
+        state.selectedCalendarDay =
+          null;
+
+        renderCalendar();
+
+        document
+          .getElementById(
+            "cal-day-panel"
+          )
+          .classList.add("hidden");
+      }
+    );
 }
 
-if (!isStandalone()) {
-  bannerStandalone.classList.remove('hidden');
+/* =========================================================
+   AUTO REFRESH
+   ========================================================= */
+
+/*
+   Verificarea din 30 în 30 minute.
+
+   IMPORTANT:
+   JavaScript-ul unei pagini web NU poate garanta
+   executarea la fiecare 30 minute dacă aplicația este
+   închisă sau suspendată de iOS.
+
+   Verificarea reală la 30 minute trebuie făcută de
+   server / cron / GitHub Actions / alt serviciu backend.
+
+   Acest interval este util când aplicația este deschisă.
+*/
+
+const REFRESH_INTERVAL =
+  30 * 60 * 1000;
+
+function startAutoRefresh() {
+
+  setInterval(
+    async () => {
+
+      console.log(
+        "Verificare automată..."
+      );
+
+      await refreshAllDosare();
+
+    },
+    REFRESH_INTERVAL
+  );
 }
 
-showList();
+/* =========================================================
+   PORNIRE APLICAȚIE
+   ========================================================= */
+
+async function init() {
+
+  loadState();
+
+  bindEvents();
+
+  renderList();
+
+  updateStandaloneBanner();
+
+  updateNotificationButton();
+
+  await registerServiceWorker();
+
+  if (
+    state.activeTab ===
+    "calendar"
+  ) {
+    switchTab("calendar");
+  }
+
+  /*
+    Verifică imediat dosarele când aplicația
+    este deschisă.
+  */
+
+  if (state.dosare.length) {
+    refreshAllDosare();
+  }
+
+  startAutoRefresh();
+}
+
+document.addEventListener(
+  "DOMContentLoaded",
+  init
+);
+```
