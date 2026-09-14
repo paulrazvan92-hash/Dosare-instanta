@@ -173,6 +173,130 @@ h1, h2, h3 { font-family: var(--serif); margin: 0; }
   margin: 0.75rem 0 0;
 }
 
+/* ---------- Tabs ---------- */
+
+.tabs {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 0;
+  display: flex;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  background: none;
+  border: none;
+  font-family: var(--sans);
+  font-size: 0.92rem;
+  color: var(--charcoal-soft);
+  padding: 0 0 0.75rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tab.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--brass);
+}
+
+/* ---------- Calendar ---------- */
+
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 1.25rem 0 0.75rem;
+}
+
+.cal-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.btn-ghost-dark {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 4px;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.btn-ghost-dark:active { background: var(--parchment-dim); }
+
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 0.72rem;
+  color: #9A9385;
+  margin-bottom: 0.35rem;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.cal-day {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--charcoal);
+  background: white;
+  border: 1px solid var(--line);
+  cursor: default;
+}
+
+.cal-day.empty { border: none; background: transparent; }
+
+.cal-day.has-events {
+  cursor: pointer;
+  border-color: var(--brass-soft);
+}
+
+.cal-day.has-events:active { background: var(--parchment-dim); }
+
+.cal-day.today { font-weight: 700; box-shadow: inset 0 0 0 2px var(--ink); }
+
+.cal-day.selected { background: var(--ink); color: var(--parchment); border-color: var(--ink); }
+
+.cal-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brass);
+}
+
+.cal-day.selected .cal-dot { background: var(--parchment); }
+
+.cal-day-panel {
+  margin-top: 1.75rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.cal-day-panel h3 {
+  font-size: 0.95rem;
+  color: var(--charcoal-soft);
+  font-weight: 500;
+  margin-bottom: 0.75rem;
+  text-transform: capitalize;
+}
+
 /* ---------- List ---------- */
 
 .section-title {
