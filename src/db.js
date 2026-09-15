@@ -1,135 +1,165 @@
-// Stocare simpla pe fisier (JSON). Suficienta pentru uz personal, cu
-// putini utilizatori si verificari la fiecare 30 min - nu justifica un SGBD.
+// Stocare in Postgres, oferit de Railway ca serviciu separat. Spre deosebire
+// de un fisier local, datele NU se pierd la redeploy sau la repornirea
+// serviciului aplicatiei.
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const { Pool } = require('pg');
 const crypto = require('crypto');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
+let pool = null;
 
-function ensureReady() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({ dosare: [], subscriptions: [], events: [] }, null, 2));
+function getPool() {
+  if (!pool) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error(
+        'Lipseste DATABASE_URL. Adauga un serviciu PostgreSQL pe Railway si leaga-l ' +
+        'de acest serviciu (Variables -> New Variable -> Add Reference -> DATABASE_URL).'
+      );
+    }
+    pool = new Pool({
+      connectionString,
+      ssl: connectionString.includes('railway.internal') ? false : { rejectUnauthorized: false },
+    });
   }
+  return pool;
 }
 
-function read() {
-  ensureReady();
-  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-}
-
-function write(data) {
-  // scriere atomica: scriem intr-un fisier temporar apoi redenumim
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, DB_FILE);
+async function init() {
+  const p = getPool();
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS dosare (
+      id TEXT PRIMARY KEY,
+      numar_dosar TEXT NOT NULL UNIQUE,
+      institutie TEXT,
+      label TEXT,
+      snapshot JSONB,
+      last_checked TIMESTAMPTZ,
+      last_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      dosar_id TEXT NOT NULL REFERENCES dosare(id) ON DELETE CASCADE,
+      type TEXT,
+      message TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      seen BOOLEAN NOT NULL DEFAULT false
+    );
+  `);
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+  console.log('[db] Schema Postgres verificata/creata.');
 }
 
 function id() {
   return crypto.randomBytes(8).toString('hex');
 }
 
+function rowToDosar(r) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    numarDosar: r.numar_dosar,
+    institutie: r.institutie,
+    label: r.label,
+    snapshot: r.snapshot,
+    lastChecked: r.last_checked,
+    lastError: r.last_error,
+    createdAt: r.created_at,
+  };
+}
+
 // ---------- Dosare ----------
 
-function listDosare() {
-  return read().dosare;
+async function listDosare() {
+  const { rows } = await getPool().query('SELECT * FROM dosare ORDER BY created_at ASC');
+  return rows.map(rowToDosar);
 }
 
-function getDosar(idDosar) {
-  return read().dosare.find((d) => d.id === idDosar) || null;
+async function getDosar(idDosar) {
+  const { rows } = await getPool().query('SELECT * FROM dosare WHERE id = $1', [idDosar]);
+  return rowToDosar(rows[0]);
 }
 
-function addDosar({ numarDosar, institutie, label }) {
-  const data = read();
-  const exists = data.dosare.find((d) => d.numarDosar === numarDosar);
-  if (exists) return exists;
+async function addDosar({ numarDosar, institutie, label }) {
+  const existing = await getPool().query('SELECT * FROM dosare WHERE numar_dosar = $1', [numarDosar]);
+  if (existing.rows[0]) return rowToDosar(existing.rows[0]);
 
-  const dosar = {
-    id: id(),
-    numarDosar,
-    institutie: institutie || null,
-    label: label || null,
-    snapshot: null, // ultima stare cunoscuta de la portal
-    lastChecked: null,
-    lastError: null,
-    createdAt: new Date().toISOString(),
-  };
-  data.dosare.push(dosar);
-  write(data);
-  return dosar;
+  const newId = id();
+  const { rows } = await getPool().query(
+    `INSERT INTO dosare (id, numar_dosar, institutie, label) VALUES ($1, $2, $3, $4) RETURNING *`,
+    [newId, numarDosar, institutie || null, label || null]
+  );
+  return rowToDosar(rows[0]);
 }
 
-function removeDosar(idDosar) {
-  const data = read();
-  data.dosare = data.dosare.filter((d) => d.id !== idDosar);
-  data.events = data.events.filter((e) => e.dosarId !== idDosar);
-  write(data);
+async function removeDosar(idDosar) {
+  await getPool().query('DELETE FROM dosare WHERE id = $1', [idDosar]);
 }
 
-function updateDosarSnapshot(idDosar, snapshot, error) {
-  const data = read();
-  const dosar = data.dosare.find((d) => d.id === idDosar);
-  if (!dosar) return;
-  dosar.lastChecked = new Date().toISOString();
+async function updateDosarSnapshot(idDosar, snapshot, error) {
   if (error) {
-    dosar.lastError = error;
+    await getPool().query(
+      'UPDATE dosare SET last_checked = now(), last_error = $2 WHERE id = $1',
+      [idDosar, error]
+    );
   } else {
-    dosar.lastError = null;
-    dosar.snapshot = snapshot;
+    await getPool().query(
+      'UPDATE dosare SET last_checked = now(), last_error = NULL, snapshot = $2 WHERE id = $1',
+      [idDosar, JSON.stringify(snapshot)]
+    );
   }
-  write(data);
 }
 
-// ---------- Evenimente (istoric notificari) ----------
+// ---------- Evenimente ----------
 
-function addEvent(dosarId, type, message) {
-  const data = read();
-  const event = {
-    id: id(),
-    dosarId,
-    type,
-    message,
-    createdAt: new Date().toISOString(),
-    seen: false,
-  };
-  data.events.unshift(event);
-  // pastram maxim 500 evenimente ca fisierul sa nu creasca la nesfarsit
-  data.events = data.events.slice(0, 500);
-  write(data);
-  return event;
+async function addEvent(dosarId, type, message) {
+  const newId = id();
+  const { rows } = await getPool().query(
+    `INSERT INTO events (id, dosar_id, type, message) VALUES ($1, $2, $3, $4) RETURNING *`,
+    [newId, dosarId, type, message]
+  );
+  const r = rows[0];
+  return { id: r.id, dosarId: r.dosar_id, type: r.type, message: r.message, createdAt: r.created_at, seen: r.seen };
 }
 
-function listEvents(dosarId) {
-  const data = read();
-  if (dosarId) return data.events.filter((e) => e.dosarId === dosarId);
-  return data.events;
+async function listEvents(dosarId) {
+  const { rows } = dosarId
+    ? await getPool().query('SELECT * FROM events WHERE dosar_id = $1 ORDER BY created_at DESC LIMIT 500', [dosarId])
+    : await getPool().query('SELECT * FROM events ORDER BY created_at DESC LIMIT 500');
+  return rows.map((r) => ({
+    id: r.id, dosarId: r.dosar_id, type: r.type, message: r.message, createdAt: r.created_at, seen: r.seen,
+  }));
 }
 
 // ---------- Abonamente Push ----------
 
-function addSubscription(sub) {
-  const data = read();
-  const exists = data.subscriptions.find((s) => s.endpoint === sub.endpoint);
-  if (!exists) {
-    data.subscriptions.push(sub);
-    write(data);
-  }
+async function addSubscription(sub) {
+  await getPool().query(
+    `INSERT INTO subscriptions (endpoint, data) VALUES ($1, $2)
+     ON CONFLICT (endpoint) DO UPDATE SET data = EXCLUDED.data`,
+    [sub.endpoint, JSON.stringify(sub)]
+  );
 }
 
-function removeSubscription(endpoint) {
-  const data = read();
-  data.subscriptions = data.subscriptions.filter((s) => s.endpoint !== endpoint);
-  write(data);
+async function removeSubscription(endpoint) {
+  await getPool().query('DELETE FROM subscriptions WHERE endpoint = $1', [endpoint]);
 }
 
-function listSubscriptions() {
-  return read().subscriptions;
+async function listSubscriptions() {
+  const { rows } = await getPool().query('SELECT data FROM subscriptions');
+  return rows.map((r) => r.data);
 }
 
 module.exports = {
+  init,
   listDosare,
   getDosar,
   addDosar,
