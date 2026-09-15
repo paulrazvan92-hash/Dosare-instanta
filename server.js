@@ -20,21 +20,21 @@ app.get('/api/vapid-public-key', (req, res) => {
   res.json({ key: process.env.VAPID_PUBLIC_KEY || null });
 });
 
-app.post('/api/subscribe', (req, res) => {
+app.post('/api/subscribe', async (req, res) => {
   const sub = req.body;
   if (!sub || !sub.endpoint) return res.status(400).json({ error: 'Abonament invalid' });
-  db.addSubscription(sub);
+  await db.addSubscription(sub);
   res.json({ ok: true });
 });
 
-app.post('/api/unsubscribe', (req, res) => {
+app.post('/api/unsubscribe', async (req, res) => {
   const { endpoint } = req.body;
-  if (endpoint) db.removeSubscription(endpoint);
+  if (endpoint) await db.removeSubscription(endpoint);
   res.json({ ok: true });
 });
 
-app.get('/api/dosare', (req, res) => {
-  res.json(db.listDosare());
+app.get('/api/dosare', async (req, res) => {
+  res.json(await db.listDosare());
 });
 
 app.post('/api/dosare', async (req, res) => {
@@ -42,38 +42,46 @@ app.post('/api/dosare', async (req, res) => {
   if (!numarDosar || !numarDosar.trim()) {
     return res.status(400).json({ error: 'Numărul dosarului este obligatoriu (ex: 12345/3/2023).' });
   }
-  const dosar = db.addDosar({ numarDosar: numarDosar.trim(), institutie, label });
+  const dosar = await db.addDosar({ numarDosar: numarDosar.trim(), institutie, label });
 
   // facem imediat o prima verificare, ca utilizatorul sa vada datele pe loc
   const result = await scheduler.checkDosar(dosar);
-  res.json({ dosar: db.getDosar(dosar.id), checkResult: result });
+  res.json({ dosar: await db.getDosar(dosar.id), checkResult: result });
 });
 
-app.delete('/api/dosare/:id', (req, res) => {
-  db.removeDosar(req.params.id);
+app.delete('/api/dosare/:id', async (req, res) => {
+  await db.removeDosar(req.params.id);
   res.json({ ok: true });
 });
 
 app.post('/api/dosare/:id/refresh', async (req, res) => {
-  const dosar = db.getDosar(req.params.id);
+  const dosar = await db.getDosar(req.params.id);
   if (!dosar) return res.status(404).json({ error: 'Dosar inexistent' });
   const result = await scheduler.checkDosar(dosar);
-  res.json({ dosar: db.getDosar(dosar.id), checkResult: result });
+  res.json({ dosar: await db.getDosar(dosar.id), checkResult: result });
 });
 
-app.get('/api/dosare/:id/events', (req, res) => {
-  res.json(db.listEvents(req.params.id));
+app.get('/api/dosare/:id/events', async (req, res) => {
+  res.json(await db.listEvents(req.params.id));
 });
 
-app.get('/api/events', (req, res) => {
-  res.json(db.listEvents());
+app.get('/api/events', async (req, res) => {
+  res.json(await db.listEvents());
 });
 
 // ---------- Pornire ----------
 
-push.setup();
-scheduler.start();
+async function start() {
+  await db.init();
+  push.setup();
+  scheduler.start();
 
-app.listen(PORT, () => {
-  console.log(`Server pornit pe portul ${PORT}`);
+  app.listen(PORT, () => {
+    console.log(`Server pornit pe portul ${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error('Eroare fatala la pornire:', err.message);
+  process.exit(1);
 });
