@@ -19,7 +19,7 @@ function setup() {
 }
 
 async function notifyAll(title, body, data = {}) {
-  const subs = db.listSubscriptions();
+  const subs = await db.listSubscriptions();
   const payload = JSON.stringify({ title, body, data });
 
   await Promise.all(
@@ -29,7 +29,7 @@ async function notifyAll(title, body, data = {}) {
       } catch (err) {
         // abonament expirat/invalid -> il stergem
         if (err.statusCode === 404 || err.statusCode === 410) {
-          db.removeSubscription(sub.endpoint);
+          await db.removeSubscription(sub.endpoint);
         } else {
           console.error('[push] eroare la trimitere:', err.message);
         }
